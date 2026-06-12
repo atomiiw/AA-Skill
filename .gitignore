@@ -1,0 +1,27 @@
+# ─── Python bytecode / tool caches ──────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+
+# ─── OS / editor junk ───────────────────────────────────────────────────────
+.DS_Store
+*.swp
+
+# ─── Run data — NEVER commit a user's personal financial data ───────────────
+# The skill writes everything under this tree in the user's working directory.
+split_bill_outputs/
+
+# Credentials: IMAP auth codes / app passwords.
+secrets/
+qq_auth.txt
+gmail_app_pw.txt
+
+# Bank statements / any input the user points the skill at.
+bofa*/
+*.pdf
+
+# Any stray JSONL the pipeline produces (raw / processed / ledger / splits).
+*.jsonl
