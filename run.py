@@ -14,7 +14,8 @@ Commands:
     python3 run.py daterange resolve      --start YYYY-MM --end YYYY-MM [--today YYYY-MM-DD]
 
     # Stage 2 — BofA PDFs -> split_bill_outputs/intermediate/bofa_raw.jsonl
-    python3 run.py parse-bofa --dir "<BofA folder>" [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--out PATH]
+    python3 run.py parse-bofa --dir "<BofA folder>" [--since YYYY-MM-DD] [--until YYYY-MM-DD]
+                              [--out PATH]
 
     # Stage 3 — QQ + Gmail -> split_bill_outputs/intermediate/email_raw.jsonl
     python3 run.py receipts --secrets-dir "<dir>" [--since YYYY-MM-DD] [--until YYYY-MM-DD]
@@ -50,12 +51,12 @@ OUT_ROOT = "split_bill_outputs"
 INTERMEDIATE = OUT_ROOT + "/intermediate"
 DELIVERABLES = OUT_ROOT + "/deliverables"
 
-BOFA_RAW = INTERMEDIATE + "/bofa_raw.jsonl"             # parse-bofa output
+BOFA_RAW = INTERMEDIATE + "/bofa_raw.jsonl"  # parse-bofa output
 BOFA_PROCESSED = INTERMEDIATE + "/bofa_processed.jsonl"  # Claude writes; add reads
-EMAIL_RAW = INTERMEDIATE + "/email_raw.jsonl"            # receipts output; triage/show read
+EMAIL_RAW = INTERMEDIATE + "/email_raw.jsonl"  # receipts output; triage/show read
 EMAIL_PROCESSED = INTERMEDIATE + "/email_processed.jsonl"  # Claude writes; add reads
-BILLS = DELIVERABLES + "/bills.jsonl"                   # the ledger deliverable
-SPLIT = DELIVERABLES + "/split_bills.jsonl"             # the splittable deliverable
+BILLS = DELIVERABLES + "/bills.jsonl"  # the ledger deliverable
+SPLIT = DELIVERABLES + "/split_bills.jsonl"  # the splittable deliverable
 
 
 def _indices(s):
@@ -83,7 +84,7 @@ def cmd_daterange(args):
         if not (args.start and args.end):
             raise SystemExit("daterange resolve needs --start and --end (YYYY-MM)")
         result = daterange.resolve(today, args.start, args.end)
-    else:                                   # unreachable: argparse restricts choices
+    else:  # unreachable: argparse restricts choices
         raise SystemExit(f"unknown daterange op: {args.op}")
     print(json.dumps(result))
 
@@ -95,9 +96,14 @@ def cmd_parse_bofa(args):
 def cmd_receipts(args):
     only = {s.strip() for s in args.only.split(",")} if args.only else None
     receipts.harvest(
-        since=args.since, until=args.until, secrets_dir=args.secrets_dir,
-        qq_auth=args.qq_auth, gmail_pw=args.gmail_pw, out=args.out,
-        max_chars=args.max_chars, only=only,
+        since=args.since,
+        until=args.until,
+        secrets_dir=args.secrets_dir,
+        qq_auth=args.qq_auth,
+        gmail_pw=args.gmail_pw,
+        out=args.out,
+        max_chars=args.max_chars,
+        only=only,
     )
 
 
@@ -126,7 +132,8 @@ def cmd_ledger(args):
 
 
 def cmd_split(args):
-    print(json.dumps(ledger.write_splits(_indices(args.indices), bills_path=args.bills, out=args.out)))
+    result = ledger.write_splits(_indices(args.indices), bills_path=args.bills, out=args.out)
+    print(json.dumps(result))
 
 
 def build_parser():
@@ -149,8 +156,9 @@ def build_parser():
     pb.set_defaults(func=cmd_parse_bofa)
 
     rc = sub.add_parser("receipts", help=f"Stage 3 QQ + Gmail -> {EMAIL_RAW}")
-    rc.add_argument("--secrets-dir", default=".",
-                    help="Folder holding qq_auth.txt / gmail_app_pw.txt.")
+    rc.add_argument(
+        "--secrets-dir", default=".", help="Folder holding qq_auth.txt / gmail_app_pw.txt."
+    )
     rc.add_argument("--since", help="Inclusive start YYYY-MM-DD (default: 12 months ago).")
     rc.add_argument("--until", help="Inclusive end YYYY-MM-DD (default: today).")
     rc.add_argument("--qq-auth", help="Explicit path to the QQ auth-code file.")

@@ -38,7 +38,8 @@ SKIP = re.compile(
 def pdf_text(path):
     return subprocess.run(
         ["pdftotext", "-layout", path, "-"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     ).stdout
 
 
@@ -59,7 +60,7 @@ def parse_bofa(folder, since=None, until=None, out="bofa_raw.jsonl"):
     if not pdfs:
         raise SystemExit(f"No PDFs in {folder}")
 
-    seen = set()          # (date, desc, amount) dedupe across overlapping statements
+    seen = set()  # (date, desc, amount) dedupe across overlapping statements
     n = 0
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
     with open(out, "w", encoding="utf-8") as fh:
@@ -70,7 +71,7 @@ def parse_bofa(folder, since=None, until=None, out="bofa_raw.jsonl"):
                     continue
                 raw_date, desc, raw_amt = m.group(1), m.group(2).strip(), m.group(3)
                 amount = parse_amount(raw_amt)
-                if amount >= 0:                 # money in (deposit/Zelle/refund) — not a bill
+                if amount >= 0:  # money in (deposit/Zelle/refund) — not a bill
                     continue
                 if SKIP.search(desc):
                     continue
@@ -82,12 +83,18 @@ def parse_bofa(folder, since=None, until=None, out="bofa_raw.jsonl"):
                 if key in seen:
                     continue
                 seen.add(key)
-                fh.write(json.dumps({
-                    "date": d.isoformat(),
-                    "raw_desc": desc,
-                    "amount": round(-amount, 2),   # store as positive money spent
-                    "currency": "$",
-                }, ensure_ascii=False) + "\n")
+                fh.write(
+                    json.dumps(
+                        {
+                            "date": d.isoformat(),
+                            "raw_desc": desc,
+                            "amount": round(-amount, 2),  # store as positive money spent
+                            "currency": "$",
+                        },
+                        ensure_ascii=False,
+                    )
+                    + "\n"
+                )
                 n += 1
 
     print(f"Wrote {n} BofA purchases -> {out}")

@@ -11,6 +11,7 @@ per account as: explicit file path, then $ENV, then <secrets_dir>/<file>. See
 SKILL.md for the full auth / Gmail app-password / output details.
 """
 
+import contextlib
 import email
 import html
 import imaplib
@@ -74,11 +75,33 @@ CURRENCY_RE = re.compile(r"\$|¥|￥|(?:\bRMB\b)|(?:\bCNY\b)|(?:\bUSD\b)|元", r
 # still applied afterward, on the downloaded text, as a second filter.
 KEYWORDS = [
     # English
-    "receipt", "invoice", "order", "payment", "purchase", "transaction", "refund",
-    "subscription", "renewal", "renew", "billed", "charged",
+    "receipt",
+    "invoice",
+    "order",
+    "payment",
+    "purchase",
+    "transaction",
+    "refund",
+    "subscription",
+    "renewal",
+    "renew",
+    "billed",
+    "charged",
     # Chinese
-    "收据", "账单", "付款", "订单", "发票", "消费", "交易", "支付", "扣款",
-    "订阅", "续费", "会员", "扣费", "预订",
+    "收据",
+    "账单",
+    "付款",
+    "订单",
+    "发票",
+    "消费",
+    "交易",
+    "支付",
+    "扣款",
+    "订阅",
+    "续费",
+    "会员",
+    "扣费",
+    "预订",
 ]
 
 
@@ -125,19 +148,19 @@ def extract_body_text(msg):
             (plain if msg.get_content_type() == "text/plain" else html_text).append(decoded)
 
     text = "\n".join(plain) if plain else "\n".join(html_text)
-    text = re.sub(r"(?is)<(script|style).*?>.*?</\1>", " ", text)   # drop script/style
-    text = re.sub(r"(?i)<br\s*/?>", "\n", text)                       # br -> newline
-    text = re.sub(r"<[^>]+>", " ", text)                              # strip tags
+    text = re.sub(r"(?is)<(script|style).*?>.*?</\1>", " ", text)  # drop script/style
+    text = re.sub(r"(?i)<br\s*/?>", "\n", text)  # br -> newline
+    text = re.sub(r"<[^>]+>", " ", text)  # strip tags
     text = html.unescape(text)
-    text = re.sub(r"[ \t]+", " ", text)                            # collapse runs of spaces/tabs
-    text = re.sub(r"\n\s*\n+", "\n", text)                            # collapse blank lines
+    text = re.sub(r"[ \t]+", " ", text)  # collapse runs of spaces/tabs
+    text = re.sub(r"\n\s*\n+", "\n", text)  # collapse blank lines
     return text.strip()
 
 
 # Line breaks that must all collapse to a single '\n' before serialization:
 # CRLF, lone CR, NEL (U+0085), LINE SEPARATOR (U+2028), PARAGRAPH SEPARATOR (U+2029).
 _LINEBREAKS_RE = re.compile("\r\n|[\r\u0085\u2028\u2029]")
-_KEEP_CONTROL = {"\t", "\n"}   # the only control chars we keep as real content
+_KEEP_CONTROL = {"\t", "\n"}  # the only control chars we keep as real content
 
 
 def normalize_jsonl_text(value):
@@ -168,7 +191,7 @@ def dump_jsonl(record):
 def append_candidate(f, candidate):
     """Append one candidate as a single JSON line; flush so the file grows live."""
     f.write(dump_jsonl(candidate) + "\n")
-    f.flush()   # cheap: makes the row visible to a watcher; no per-row fsync()
+    f.flush()  # cheap: makes the row visible to a watcher; no per-row fsync()
 
 
 def search_ids(M, base_criteria, keywords):
@@ -186,7 +209,7 @@ def search_ids(M, base_criteria, keywords):
         back to a full scan.
     """
     seen = set()
-    ran_ok = False                       # at least one SEARCH returned OK
+    ran_ok = False  # at least one SEARCH returned OK
     utf8_attempted = utf8_ok = False
     for kw in keywords:
         is_ascii = kw.isascii()
@@ -215,8 +238,10 @@ def search_ids(M, base_criteria, keywords):
         return data[0].split() if (typ == "OK" and data and data[0]) else []
 
     if utf8_attempted and not utf8_ok:
-        print("  (server rejected non-ASCII keyword search — some Chinese-only "
-              "receipts may be missed)")
+        print(
+            "  (server rejected non-ASCII keyword search — some Chinese-only "
+            "receipts may be missed)"
+        )
     return sorted(seen, key=lambda b: int(b))
 
 
@@ -234,7 +259,7 @@ def resolve_mailbox(M, wanted):
         for b in boxes:
             line = b.decode(errors="replace") if isinstance(b, bytes) else b
             if r"\All" in line:
-                m = re.search(r'"([^"]*)"\s*$', line)   # last quoted token = folder name
+                m = re.search(r'"([^"]*)"\s*$', line)  # last quoted token = folder name
                 if m:
                     return '"' + m.group(1) + '"'
     print("  (could not find All-Mail folder — using INBOX)")
@@ -277,24 +302,26 @@ def pull_account(account, base_criteria, max_chars, out):
     email_addr, auth, mailbox = account["email"], account["auth"], account["mailbox"]
 
     if not auth:
-        print(f"[{name}] no auth code set — skipping. "
-              f"(Set the env var or sibling file shown in CONFIG to enable.)\n")
+        print(
+            f"[{name}] no auth code set — skipping. "
+            f"(Set the env var or sibling file shown in CONFIG to enable.)\n"
+        )
         return 0
 
     print(f"[{name}] connecting to {host} as {email_addr} ...")
     M = imaplib.IMAP4_SSL(host, port)
     M.login(email_addr, auth)
-    try:
+    with contextlib.suppress(Exception):
         M._simple_command("ID", '("name" "receipts-script" "version" "2.0")')
-    except Exception:
-        pass
     # read-only: fetching must not mark the user's mail as read.
     mailbox = resolve_mailbox(M, mailbox)
     M.select(mailbox, readonly=True)
 
     ids = search_ids(M, base_criteria, KEYWORDS)
-    print(f"[{name}] {len(ids)} emails matched a receipt keyword; "
-          f"checking each for a currency sign ...")
+    print(
+        f"[{name}] {len(ids)} emails matched a receipt keyword; "
+        f"checking each for a currency sign ..."
+    )
 
     count = 0
     for num in ids:
@@ -302,7 +329,7 @@ def pull_account(account, base_criteria, max_chars, out):
         if typ != "OK" or not msg_data or not msg_data[0]:
             continue
         candidate = build_candidate(email.message_from_bytes(msg_data[0][1]), name, max_chars)
-        if candidate is None:                       # no currency sign — skip
+        if candidate is None:  # no currency sign — skip
             continue
         append_candidate(out, candidate)
         count += 1
@@ -313,8 +340,16 @@ def pull_account(account, base_criteria, max_chars, out):
     return count
 
 
-def harvest(since=None, until=None, secrets_dir=".", qq_auth=None, gmail_pw=None,
-            out="candidates.jsonl", max_chars=6000, only=None):
+def harvest(
+    since=None,
+    until=None,
+    secrets_dir=".",
+    qq_auth=None,
+    gmail_pw=None,
+    out="candidates.jsonl",
+    max_chars=6000,
+    only=None,
+):
     """Harvest receipt candidates from QQ + Gmail into `out`, return total kept.
 
     `since`/`until` are inclusive "YYYY-MM-DD" strings (defaults: 12 months ago /
@@ -342,15 +377,15 @@ def harvest(since=None, until=None, secrets_dir=".", qq_auth=None, gmail_pw=None
 
     out_path = os.path.expanduser(out)
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
-    fh = open(out_path, "w", encoding="utf-8")   # truncate/create now so it's visible immediately
-    print(f"Created {out_path} — watching it grow as candidates are found.\n")
     total = 0
-    for account in accounts:
-        try:
-            total += pull_account(account, base_criteria, max_chars, fh)
-        except Exception as e:
-            print(f"[{account['name']}] ERROR: {e}\n")
-    fh.close()
+    # truncate/create now so the file is visible immediately and grows live.
+    with open(out_path, "w", encoding="utf-8") as fh:
+        print(f"Created {out_path} — watching it grow as candidates are found.\n")
+        for account in accounts:
+            try:
+                total += pull_account(account, base_criteria, max_chars, fh)
+            except Exception as e:
+                print(f"[{account['name']}] ERROR: {e}\n")
 
     print(f"Done. Kept {total} candidate emails total across {len(accounts)} account(s).")
     print(f"Wrote -> {out_path}")
@@ -359,6 +394,7 @@ def harvest(since=None, until=None, secrets_dir=".", qq_auth=None, gmail_pw=None
     # (one JSON object per physical line). Fail loudly if not — never ship a
     # broken file that crashes the reader later.
     from scripts.candidates import verify_jsonl
+
     ok, errors = verify_jsonl(out_path)
     if ok:
         print(f"Strict JSONL check: PASS ({out_path}: one JSON object per line).")

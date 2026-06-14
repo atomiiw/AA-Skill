@@ -41,8 +41,9 @@ def start_years(today):
 
 def start_months(today, year):
     """Window months that fall in `year`, oldest first."""
-    return [{"label": month_label(y, m), "value": f"{y}-{m:02d}"}
-            for y, m in window(today) if y == year]
+    return [
+        {"label": month_label(y, m), "value": f"{y}-{m:02d}"} for y, m in window(today) if y == year
+    ]
 
 
 def end_options(today, start):

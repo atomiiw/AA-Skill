@@ -99,9 +99,12 @@ def check_jsonl_writer(skill_root: Path, failures: list[str]) -> None:
                 "from": "Sender <a@x.com>",
                 "subject": "Order\r\n wrapped\r and split",
                 "date_header": "Wed, 1 Apr 2026 21:46:01 +0000",
-                "body": ("line1\r\nline2\rline3 " + HOSTILE
-                         + " tab\there \u4e2d\u6587\u6536\u636e emoji \U0001f9fe end "
-                         + "x" * 9000),
+                "body": (
+                    "line1\r\nline2\rline3 "
+                    + HOSTILE
+                    + " tab\there \u4e2d\u6587\u6536\u636e emoji \U0001f9fe end "
+                    + "x" * 9000
+                ),
             },
             {
                 "source": "gmail",
@@ -115,7 +118,9 @@ def check_jsonl_writer(skill_root: Path, failures: list[str]) -> None:
 
         cleaned = []
         for rec in hostile:
-            row = {k: (normalize_jsonl_text(v) if isinstance(v, str) else v) for k, v in rec.items()}
+            row = {
+                k: (normalize_jsonl_text(v) if isinstance(v, str) else v) for k, v in rec.items()
+            }
             row["body"] = row["body"][:6000]
             cleaned.append(row)
 
@@ -148,7 +153,7 @@ def check_jsonl_writer(skill_root: Path, failures: list[str]) -> None:
             if problems:
                 failures.append("JSONL writer regression: " + " | ".join(problems))
             else:
-                pass_msg("JSONL writer regression: hostile records -> strict one-line-per-record JSONL")
+                pass_msg("JSONL writer regression: hostile records -> strict one-line JSONL")
         finally:
             _os.unlink(tmp)
     except Exception as exc:  # noqa: BLE001
@@ -236,7 +241,9 @@ def main() -> int:
     if RUN_PERMISSION in skill_text:
         pass_msg("SKILL.md documents the run.py wildcard permission rule")
     else:
-        warnings.append(f"SKILL.md does not document the recommended permission rule: {RUN_PERMISSION}")
+        warnings.append(
+            f"SKILL.md does not document the recommended permission rule: {RUN_PERMISSION}"
+        )
 
     for module in INTERNAL_MODULES:
         stale = f"Bash(python3 {SKILL_DIR_REF}/{module}:*)"

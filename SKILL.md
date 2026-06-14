@@ -27,33 +27,23 @@ Stage 4  Split selection → split_bills.jsonl   ← INTERACTIVE (append as you 
 
 ## ⛔ Interaction contract — READ FIRST, applies to the whole skill
 
-The Permissions preflight and the interactive stages (0, 1, 4) are **mandatory
-STOP points**. At each one you MUST ask the user and **wait for their actual
-reply** before doing anything else.
+The Permissions preflight and the interactive stages (0, 1, 3.5, 4) are
+**mandatory STOP points**. At each one, every value comes from the user's reply
+**in this session** — a path, a month, a start day, a split choice. Ask the
+question, then wait for that reply before continuing.
 
-**You are forbidden to assume, default, guess, or auto-fill any interactive
-input — even when an obvious answer exists.** Specifically:
-- Do **not** treat the presence of a folder like `./bofa Apr to Jun records`, or
-  `qq_auth.txt` in the cwd, as permission to skip Stage 0. A plausible path is
-  NOT an answer — the user must give it to you.
-- Do **not** pick the end month (or "the full window", or "through the current
-  month") yourself in Stage 1. Every month boundary comes from the user.
-- Do **not** carry on to the next stage, run any script, or say things like
-  "I'll use the obvious locations" / "I'll take it through June". That is the
-  exact failure this contract exists to prevent.
-
-The only thing you may reuse without re-asking is an answer the user **already
-gave you in this same session** (e.g. a path captured in Stage 0). There is no
-"defaults" shortcut; if you have not been told, you ask. When in doubt, ask.
+The one thing you may reuse without re-asking is an answer the user already gave
+you earlier in this same session (e.g. a path captured in Stage 0). Anything you
+haven't been told yet, you ask for. When in doubt, ask.
 
 Each interactive stage below ends with a **STOP** line — when you reach it, send
-the question and end your turn. Do not pre-run later stages "to save time".
+the question and end your turn. Work one stage at a time, in order.
 
 ## Files & where things live
 
 **Skill code** lives in this skill folder (the directory that holds this
 SKILL.md — currently `.claude/skills/split-bills/`). There is a **single
-entrypoint**, `run.py`; the stage logic lives in the private `pipeline/` package
+entrypoint**, `run.py`; the stage logic lives in the private `scripts/` package
 (functions only — never invoked directly). Always call `run.py` and a subcommand,
 e.g. `python3 .claude/skills/split-bills/run.py parse-bofa …`. If the folder ever
 moves, use its new path; the commands below assume `.claude/skills/split-bills/`:
@@ -73,21 +63,20 @@ moves, use its new path; the commands below assume `.claude/skills/split-bills/`
   indices, so you read just the plausible receipts.
 - `run.py add --from <…_processed.jsonl>` — appends rows you wrote to the ledger
   `…/deliverables/bills.jsonl`, de-duplicates (brand+amount+date), and re-sorts by
-  date ascending.
+  date ascending. There are only ever **two** processed files written by hand:
+  `bofa_processed.jsonl` and `email_processed.jsonl` — one BofA, one email, each
+  produced directly from its `_raw` counterpart.
 - `run.py sort` / `run.py trim --since <date>` / `run.py ledger` — sort, trim by
   start day (flexible date parsing), and print the numbered date-sorted ledger.
 - `run.py split --indices 0,3,7` — appends the chosen ledger rows to
   `…/deliverables/split_bills.jsonl` (Stage 4).
 
-**⛔ HARD RULE — `run.py` is the ONLY script you run.** Never write a throwaway
-`.py` file, never use `python3 -c …`, and never append `&& echo …`, `| wc -l`, or
-any other shell helper to a `run.py` call — those break out of the single allow
-rule and trigger a fresh permission prompt (this is exactly what caused the prompt
-flood before). Every mechanical step already has a subcommand that prints its own
-summary. To get rows into the ledger, compose them with the **Write tool** into the
-matching `…/intermediate/<bofa|email>_processed.jsonl` file, then
-`run.py add --from <that file>`. That is the entire write path — there is no
-ad-hoc-script path.
+**⛔ HARD RULE — `run.py` is the ONLY script you run.** Call exactly one
+`run.py <subcommand>` per Bash command — each prints its own summary, so a single
+clean command does the job. The one allow rule covers every subcommand and
+argument, keeping the run prompt-free. To put rows in the ledger, compose them with
+the **Write tool** into the matching `…/intermediate/<bofa|email>_processed.jsonl`
+file, then `run.py add --from <that file>`.
 
 **Inputs** are EXTERNAL paths the user gives you in Stage 0 (BofA PDF folder; the
 secrets folder holding `qq_auth.txt` / `gmail_app_pw.txt`). Never hardcode them.
@@ -148,81 +137,52 @@ consent is the authorization. Never edit it otherwise.
 - **total** — string with currency symbol, `$` or `¥` (RMB).
 - **date** — ISO `YYYY-MM-DD`.
 - **source** — `bofa` | `qq` | `gmail` (helps dedupe & trace).
+- **unverified** — *optional* boolean. Set `true` on a row whose vendor you could
+  only guess (see *Vendor normalization*); omit it on confident rows. `ledger`
+  flags these with a `⚠` for the user to eyeball.
 
 ---
 
 ## Stage 0 — Locate inputs (INTERACTIVE) — do this FIRST
 
-Get **two paths** from the user with **`AskUserQuestion`**, one question at a time:
-the **BofA folder** and the **secrets folder**. The secrets folder is one
-directory that holds **both** credential files together — `qq_auth.txt` and
-(optionally) `gmail_app_pw.txt`; you pass it once as `--secrets-dir`. Do **not**
-scrape the filesystem for candidates — the user supplies each path directly.
+You need **two paths** from the user, asked one at a time in **plain text** — no
+`AskUserQuestion`, no options. Ask for the path, end your turn, and resume the skill
+when the user replies (they'll paste or drag-and-drop it).
 
-**Expect nothing, pre-fill nothing.** Do not look up, compute, or guess a default
-path — no cwd, no `./qq_auth.txt`, no "obvious" location. Guessing presumes input
-the user hasn't given and wastes tokens/time. You know **zero** paths until the
-user types or drops one. The path always arrives through the harness's built-in
-**"Other"** free-text box.
+1. Ask for the **BofA folder** — the directory of BofA statement PDFs. **STOP** and
+   wait; the reply becomes `--dir "<path>"`.
+2. Ask for the **secrets folder** — one directory holding `qq_auth.txt` and,
+   optionally, `gmail_app_pw.txt`. **STOP** and wait; the reply becomes
+   `--secrets-dir "<path>"`.
 
-**Tool reality (don't fight it):** `AskUserQuestion` requires **2–4 explicit
-options** — a lone option errors with `InputValidationError` — and the harness
-**always** appends its own free-text **"Other"** entry. So you can't render a
-blank/one-option picker; the user sees your options plus "Other". Use exactly two
-fixed options, neither of which is a guessed path:
-
-```
-Question: <what path is needed>? Paste or drop it in the "Other" field.
-Options:
-  1. Paste / drop path   (reminder to use the built-in "Other" box)
-  2. Skip
-```
-
-Interpret the answer:
-- **Other (free text)** → the typed/dropped string is the path. This is the
-  normal path-in route.
-- **Skip** → do **not** guess a fallback. Pause and tell the user this input is
-  required; re-ask when they're ready.
-
-Keep wording minimal — short labels, no filler. Ask twice, STOP after each:
-1. **BofA folder** → `--dir "<path>"`. Then **STOP**.
-2. **Secrets folder** (the directory holding `qq_auth.txt` and, if you have it,
-   `gmail_app_pw.txt`) → `--secrets-dir "<path>"`. Then **STOP**.
-
-For both, the two fixed options are **Paste / drop path** and **Skip** — never a
-pre-filled path; the value is dropped via "Other". The secrets folder must contain
-at least `qq_auth.txt`; `gmail_app_pw.txt` is optional — if it's absent from the
-folder, `run.py receipts` skips Gmail and still does QQ.
-
-Remember both for the session; reuse them and never re-ask. If a chosen path is
-wrong/empty, say so and re-ask that one. Outputs always go to the current working
+The secrets folder needs at least `qq_auth.txt`; without `gmail_app_pw.txt`,
+`run.py receipts` does QQ only. Reuse both paths for the rest of the session; if one
+turns out wrong/empty, say so and ask again. Outputs go to the current working
 directory.
 
 ---
 
 ## Stage 1 — Date range (INTERACTIVE, selector only)
 
-Pick **start month** then **end month** — **month granularity only, no day
-selection**. Every option set is computed from **today's date** by
-`run.py daterange`; never ask for a typed date, and never offer a month past the
-current month. Use `AskUserQuestion` selectors only.
+Pick **start month** then **end month** — **month granularity only**. Every option
+set is computed from **today's date** by `run.py daterange`, and you present it with
+`AskUserQuestion` selectors. The options the script returns already stop at the
+current month, so just offer what it gives you.
 
 The selectable window is the **current month and the 3 months before it** (4
 months max). Start can be any month in that window; end is any month from the
 start through the current month (a one-month range is fine). Because the window
 is ≤4 months, each step is a single ≤4-option question — **no quarter step**.
 
-`AskUserQuestion` needs **2–4 options** (the auto-added "Other" doesn't count). If
-a step's helper returns only **one** month, you still MUST ask — do not treat a
-single computed option as license to auto-pick. Present that one month plus a
-second explicit option such as "Pick a different start month" (which loops back to
-the prior step); never skip the question because the choice looks forced.
+`AskUserQuestion` needs **2–4 options** (the auto-added "Other" doesn't count). When
+a step's helper returns only **one** month, still ask: present that month plus a
+second option like "Pick a different start month" (which loops back a step), and let
+the user choose.
 
 Run the helper for each step (override the clock only for testing with
-`--today YYYY-MM-DD`). **Present every option in the EXACT order the script
-returns it** — the `months` arrays are already sorted chronologically (oldest →
-newest). Never reorder, re-rank, or move the "recommended" one first; the user
-expects March, April, May, June in that order.
+`--today YYYY-MM-DD`). **Present options in the exact order the script returns
+them** — the `months` arrays are already chronological (oldest → newest), e.g.
+March, April, May, June.
 
 1. **Start year** — `python3 .claude/skills/split-bills/run.py daterange start-years`
    - One year returned → use it silently, no question.
@@ -237,11 +197,9 @@ expects March, April, May, June in that order.
 
 3. **End month** — `python3 .claude/skills/split-bills/run.py daterange end-options --start <YYYY-MM>`
    **Call `AskUserQuestion`** ("Which month does the range end in?"), presenting
-   the returned `label`s as the options in the returned (chronological) order —
-   every month from the start through the current month, inclusive. Year is baked
-   into each label, so no separate end-year step. **You must ASK this with the
-   tool — never assume the end is the current month or "the full window", and
-   never just print the question as text. Wait for the pick.**
+   the returned `label`s in order — every month from the start through the current
+   month, inclusive (the year is baked into each label). Send it as a real selector
+   and use the month the user picks.
 
    **STOP** after the start-month question until the user picks; then **STOP**
    again after the end-month question until they pick. Two separate selector
@@ -272,16 +230,21 @@ expects March, April, May, June in that order.
 3. **Infer `item`** from the brand/category, since statements have no line items:
    restaurant → the cuisine/dish (`pho`, `coffee`), grocery → `groceries`,
    rideshare → `ride`, SaaS → `subscription`, hotel → `hotel stay`, parking →
-   `parking`, etc.
+   `parking`, etc. **Only when the vendor is confirmed** — if you couldn't verify
+   it, mark the row `unverified` and use `item:"unknown"` (see the no-fabrication
+   HARD RULE in *Vendor normalization*).
 4. **Write** the cleaned rows (each `{brand, item, total:"$X.XX", date,
-   source:"bofa"}`) with the Write tool into
-   `split_bill_outputs/intermediate/bofa_processed.jsonl`, then merge them into
-   the ledger:
+   source:"bofa"}`, plus `"unverified": true` on any you couldn't confirm) with
+   the Write tool into `split_bill_outputs/intermediate/bofa_processed.jsonl`,
+   then merge them into the ledger:
    ```bash
    python3 .claude/skills/split-bills/run.py add --from split_bill_outputs/intermediate/bofa_processed.jsonl
    ```
    `add` creates `…/deliverables/bills.jsonl` if absent, de-dupes, and keeps it
-   date-sorted. Do NOT hand-edit `bills.jsonl` or use `python3 -c` to write it.
+   date-sorted.
+5. **Report unverified vendors.** Run `run.py ledger`, then tell the user how many
+   rows are `⚠ unverified` and list their brands, so they can correct any before
+   splitting.
 
 ## Stage 3 — QQ + Gmail → bills.jsonl (AUTOMATIC)
 
@@ -293,50 +256,43 @@ expects March, April, May, June in that order.
    (`{source, from, subject, date_header, body}` per email).
    It writes incrementally; it may take a few minutes (run it and wait).
 
-   **Strict JSONL invariant.** `email_raw.jsonl` is **one physical line = one
-   complete JSON object**. Every row is produced by real JSON serialization
-   (`json.dumps`), and every email-derived field (`from`, `subject`,
-   `date_header`, `body`) is normalized first — CRLF/CR/NEL/LS/PS folded to `\n`,
-   invisible Unicode control/format characters (BOM, zero-width, bidi marks)
-   stripped, Chinese/emoji/tabs kept, truncation applied only after that. The
-   harvester then **verifies the file it just wrote** and fails loudly on any
-   blank line, non-JSON line, or non-object line. Never hand-write raw email body
-   text into the file. (The reader/triage side still tolerates and warns on
-   malformed lines, purely to keep reading older pre-strict files.)
-2. **Triage WITHOUT reading the raw file** — never open `email_raw.jsonl` with
-   the Read tool (it is often >1 MB). Instead:
+   `receipts` writes verified strict JSONL (one JSON object per line) and you read
+   it back through `triage`/`show` below — so let the harvester own that file and
+   work from its subcommands.
+Now turn `email_raw.jsonl` into its processed counterpart,
+`split_bill_outputs/intermediate/email_processed.jsonl` — the email twin of
+`bofa_processed.jsonl` — by going through the emails once:
+
+2. Scan the inbox with `triage` (it keeps the often >1 MB raw file out of context,
+   so read it this way rather than with the Read tool):
    ```bash
    python3 .claude/skills/split-bills/run.py triage
    ```
-   That prints one compact line per email (index, source, currency flag, from,
-   subject). From the subjects/senders, with your own judgment, **drop
-   newsletters, promotions, and ads** (e.g. "40% off", "Member Days", bonus-miles
-   offers, "GUNS FOR SALE") and keep only plausible receipts/order
-   confirmations/payment emails.
-3. Open just the plausible ones by index to read their bodies:
+   It prints one compact line per email (index, source, currency flag, from,
+   subject). Keep the genuine receipts, order confirmations, and payment emails;
+   let the newsletters, promotions, and ads (e.g. "40% off", "Member Days",
+   bonus-miles offers, "GUNS FOR SALE") fall away.
+3. Read the bodies of the ones you kept:
    ```bash
    python3 .claude/skills/split-bills/run.py show --indices 4,5,6,12
    ```
-   For each real receipt, extract `{brand, item, total, date, source}`:
-   - `brand` from the sender/subject (Anthropic, Vercel, SKIMS, Uber Eats…).
-   - `item` from the body (the product/plan/dish).
-   - `total` with the right symbol — `$` or `¥` (QQ mail may be RMB).
-   - `date` from `date_header` → ISO.
-4. **Write** those rows with the Write tool into
-   `split_bill_outputs/intermediate/email_processed.jsonl`, then merge:
+   Turn each into one row `{brand, item, total, date, source}` — `brand` from the
+   sender/subject (Anthropic, Vercel, SKIMS, Uber Eats…), `item`/`total` from the
+   body (`$` or `¥` as written), `date` from `date_header` as ISO.
+4. Collect those rows into the single file `email_processed.jsonl`, then merge it
+   into the ledger:
    ```bash
    python3 .claude/skills/split-bills/run.py add --from split_bill_outputs/intermediate/email_processed.jsonl
    ```
    `add` de-dupes against the BofA rows already present (same brand + amount +
-   date → kept once, BofA preferred) and re-sorts by date. No manual appends, no
-   `python3 -c`.
+   date → kept once, BofA preferred) and re-sorts by date.
 
 When Stage 3 finishes, briefly report the total counts per source. Do NOT ask the
 user anything yet.
 
-**HARD RULE — the ledger stays sorted by `date` ascending at all times.** `add`
-already re-sorts on every merge, so no separate sort step is needed; if you ever
-suspect it drifted, run `python3 .claude/skills/split-bills/run.py sort`.
+`add` keeps the ledger sorted by date on every merge, so there's no separate sort
+step; if you ever need to re-sort, run
+`python3 .claude/skills/split-bills/run.py sort`.
 
 ---
 
@@ -374,50 +330,40 @@ Interpret the answer:
 
 ## Stage 4 — Split selection (INTERACTIVE) → split_bills.jsonl
 
-First get the stable, numbered ledger (do not Read `bills.jsonl` directly):
+First get the stable, numbered ledger with `ledger`:
 ```bash
 python3 .claude/skills/split-bills/run.py ledger
 ```
-Each row prints with an index `[N]`. Those indices are what you feed to `split`
-below; they stay stable because both `ledger` and `split` sort identically. Go
-through the ledger and ask the user, **for every line**, whether it is splittable
-(a shared expense) or personal.
+Each row prints with an index `[N]`; those indices feed `split` below and stay
+stable because both `ledger` and `split` sort identically. Go through the ledger
+and ask the user, **for every line**, whether it is splittable (a shared expense)
+or personal.
 
-- **Batch = ONE simple question of exactly 3 real items, NO "None" option.** Keep
-  it clean and low-misclick: each batch is a single `multiSelect: true` question
-  listing **3 real ledger items** as its options. Do **not** add a "None" option,
-  and do **not** stack sub-questions in one call — that expands awkwardly on
-  "Next" and causes misclicks. One question, one batch; advance 3 items at a time
-  through the whole list. (Last batch may hold fewer than 3 items.)
-- **HARD RULE — the picker's auto-added free-text "Other" box IS the
-  "none / all personal" signal.** `AskUserQuestion` always appends an "Other"
-  field that cannot be removed; repurpose it instead of fighting it. Interpret the
-  answer as: any **real items checked** → those are splittable; **"Other" selected
-  with no real items checked** → none in this batch are splittable. If both are
-  somehow selected, take the checked real items and ignore "Other".
-- **HARD RULE — a blank / empty answer == "none / all personal", NOT a
-  dismissal.** When the user picks "Other" and types nothing, the harness returns
-  an **empty answer** (it can surface as "the user did not answer"). Do **not**
-  treat this as a cancel and do **not** re-ask, pause, or ask "are we good" —
-  record **zero splittable** for that batch and advance to the next batch
-  automatically.
-- **HARD RULE — show the FULL `item` text in every option label.** Label each as
-  `brand — <full item> — total`, with the date in the option description. Never
-  condense, abbreviate, or truncate the `item` (e.g. keep the complete restaurant
-  name + address for Uber Eats rows).
-- **HARD RULE — append to `split_bills.jsonl` as you go, via `split`.** After
-  *each* batch, immediately write that batch's checked rows by their ledger index:
+- **One batch = one `multiSelect` question of 3 real ledger items.** Advance 3 at a
+  time through the whole list (the last batch may hold fewer). Keep each batch a
+  single flat question — that's the low-misclick shape.
+- **The picker's auto-added "Other" box is your "none / all personal" signal.**
+  `AskUserQuestion` always appends an "Other" field; use it. Read the answer as:
+  real items checked → those are splittable; "Other" with nothing real checked →
+  none in this batch. If both appear, take the checked items and ignore "Other".
+- **A blank / empty answer means "none / all personal."** When the user picks
+  "Other" and types nothing, the harness returns an empty answer (it may surface as
+  "the user did not answer"). Record zero splittable for that batch and move on to
+  the next batch automatically — it's a valid answer.
+- **Label each option with the full `item` text:** `brand — <full item> — total`,
+  with the date in the description (keep the complete restaurant name + address for
+  Uber Eats rows).
+- **Write each batch's picks as you go, via `split`.** After every batch, write
+  that batch's checked rows by their ledger index:
   ```bash
   python3 .claude/skills/split-bills/run.py split --indices 3,7
   ```
-  `split` appends those exact ledger rows (unchanged) to `split_bills.jsonl`,
-  creating it on the first call. Do not hand-write the file or wait until the end.
-  For a batch with zero splittable items, simply call no `split` for that batch.
+  `split` appends those exact ledger rows to `split_bills.jsonl`, creating it on
+  the first call. For a batch with nothing splittable, just skip the `split` call.
 - At the end, report: kept N of M as splittable, and where the file is.
 
-**STOP** at every batch: send the call and wait. Never decide for the user which
-items are splittable, and never auto-classify the whole list to skip the prompts —
-each item is the user's call.
+**STOP** at every batch: send the question and wait. Each item's splittable /
+personal call is the user's — ask every batch.
 
 ---
 
@@ -445,17 +391,27 @@ Resolve to a real **brand** in two passes:
   `PHO N MOR` → *Pho N More* (Vietnamese), `PARKO` → parking app,
   `DISCORD NITROMON` → *Discord* (item: Nitro subscription),
   `MOVITA JUICE` → *Movita Juice Bar*.
-- If a name is still unresolvable after a lookup, keep the best cleaned form and
-  move on — don't block the pipeline.
+
+**⛔ HARD RULE — flag any vendor you can't verify; an honest "unknown" beats a
+confident guess.** A vendor counts as verified only when it's an obvious known
+brand or a WebSearch returns a clear matching business. For anything short of that
+(e.g. `SPICY EVERY DAY LOS ANGELES` with no convincing hit):
+1. Keep `brand` as the cleaned descriptor verbatim (Pass A output, e.g.
+   `Spicy Every Day`) — the literal name, nothing embellished.
+2. Set `item` to `"unknown"`.
+3. Add `"unverified": true`.
+Verified rows omit `unverified`. The `ledger` `⚠` and your Stage 2/3 report surface
+these for the user to confirm.
 
 There is no free personal API for reverse-descriptor lookup (Mastercard/Visa
 offer one but require issuer credentials), so the WebSearch fallback is the
 intended method.
 
 ## Notes
-- Only Stages 0, 1, and 4 are interactive. Never pause Stages 2–3 for input.
-- Capture the BofA folder and secrets folder once in Stage 0 and reuse them for
-  the whole session — don't re-ask in Stages 2/3.
+- Stages 0, 1, 3.5, and 4 are interactive; Stages 2–3 run start to finish without
+  pausing for input.
+- Capture the BofA folder and secrets folder once in Stage 0 and reuse them all
+  session.
 - All run artifacts live under `split_bill_outputs/` in the working directory.
   `intermediate/` holds the scratch files (`bofa_raw.jsonl`,
   `bofa_processed.jsonl`, `email_raw.jsonl`, `email_processed.jsonl`); the

@@ -42,8 +42,11 @@ def _load(path):
                 skipped += 1
                 print(f"  (warning: skipped malformed line {n} in {path})", file=sys.stderr)
     if skipped:
-        print(f"  (warning: skipped {skipped} blank/malformed line(s) in {path}; "
-              f"regenerate it to get a strict file)", file=sys.stderr)
+        print(
+            f"  (warning: skipped {skipped} blank/malformed line(s) in {path}; "
+            f"regenerate it to get a strict file)",
+            file=sys.stderr,
+        )
     return rows
 
 

@@ -25,3 +25,9 @@ bofa*/
 
 # Any stray JSONL the pipeline produces (raw / processed / ledger / splits).
 *.jsonl
+
+# ─── Maintainer-only ─────────────────────────────────────────────────────────
+# DEBUG.md is the skill author's trials/improvement log. It must never ship on
+# `main` (it's not part of the skill users grab), so it's ignored here. It lives
+# tracked on the `develop` branch only, force-added past this rule.
+DEBUG.md

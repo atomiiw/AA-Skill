@@ -23,17 +23,27 @@ import os
 import re
 from datetime import date
 
-_MONTH_NAMES = ["january", "february", "march", "april", "may", "june", "july",
-                "august", "september", "october", "november", "december"]
+_MONTH_NAMES = [
+    "january",
+    "february",
+    "march",
+    "april",
+    "may",
+    "june",
+    "july",
+    "august",
+    "september",
+    "october",
+    "november",
+    "december",
+]
 
 
 def _load(path):
     rows = []
-    try:
-        fh = open(path, encoding="utf-8")
-    except FileNotFoundError:
+    if not os.path.exists(path):
         return rows
-    with fh:
+    with open(path, encoding="utf-8") as fh:
         for line in fh:
             line = line.strip()
             if not line:
@@ -161,7 +171,8 @@ def trim(since, bills_path="bills.jsonl"):
     iso = parse_flexible_date(since, _year_hint(rows))
     if not iso:
         raise SystemExit(
-            f"Could not parse start day '{since}'. Try e.g. 2026-04-16, 4/16, or 'April 16'.")
+            f"Could not parse start day '{since}'. Try e.g. 2026-04-16, 4/16, or 'April 16'."
+        )
     kept = [r for r in rows if (r.get("date") or "") >= iso]
     kept.sort(key=_sort_key)
     removed = len(rows) - len(kept)
@@ -170,13 +181,25 @@ def trim(since, bills_path="bills.jsonl"):
 
 
 def ledger_text(bills_path="bills.jsonl"):
-    """Stable, numbered, date-sorted listing — indices match write_splits()."""
+    """Stable, numbered, date-sorted listing — indices match write_splits().
+
+    Rows carrying a truthy `unverified` flag (vendor that could not be confidently
+    identified) are marked with a trailing ⚠, and counted in the header, so an
+    unconfirmed guess is never mistaken for a verified brand.
+    """
     rows = _load(bills_path)
     rows.sort(key=_sort_key)
-    out = [f"{len(rows)} bills (idx | date | brand | item | total | source)"]
+    unverified = sum(1 for r in rows if r.get("unverified"))
+    header = f"{len(rows)} bills (idx | date | brand | item | total | source)"
+    if unverified:
+        header += f"  — ⚠ {unverified} unverified (eyeball these)"
+    out = [header]
     for i, r in enumerate(rows):
-        out.append(f"[{i:>3}] {r.get('date', '?'):10} {str(r.get('brand', '?')):22} | "
-                   f"{r.get('item', '')} | {r.get('total', '')} | {r.get('source', '')}")
+        flag = "  ⚠ unverified" if r.get("unverified") else ""
+        out.append(
+            f"[{i:>3}] {r.get('date', '?'):10} {str(r.get('brand', '?')):22} | "
+            f"{r.get('item', '')} | {r.get('total', '')} | {r.get('source', '')}{flag}"
+        )
     return "\n".join(out)
 
 
