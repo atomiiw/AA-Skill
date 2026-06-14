@@ -65,3 +65,13 @@
   Wingstop. For food, the brand is always the platform I ordered on, unless I paid
   offline at a restaurant.
 
+
+## 11. 2026-06-14 — Required dependency (pdftotext) handling
+- **Situation:** `parse-bofa` shells out to `pdftotext` (from Poppler), a system
+  binary that isn't pip/env-installable, so today it needs a manual
+  `brew install poppler`. Options discussed: have `run.py` detect-and-install it (a
+  child process, so it stays under the single run.py allow rule, no extra prompt), or
+  switch PDF parsing to a pip-installable Python extractor; caveats are system
+  mutation, brew-absent / non-mac, and network.
+- **Demand:** look up online how other skills conventionally take care of a required
+  dependency.
