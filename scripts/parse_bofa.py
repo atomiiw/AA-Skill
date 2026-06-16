@@ -10,7 +10,8 @@ pay / deposits, and emit {date, raw_desc, amount, currency} per transaction.
 An LLM (Claude) then reads bofa_raw.jsonl and turns each cryptic raw_desc into a
 real brand + item for bills.jsonl.
 
-Needs `pdftotext` (poppler).  brew install poppler   if missing.
+Needs `pdftotext` (poppler). parse_bofa() checks for it up front via
+ensure_pdftotext() and exits with OS-specific install instructions if missing.
 
 Functions-only module — no CLI. The front door is ../run.py, which calls
 parse_bofa(). The BofA folder is an EXTERNAL path the user points to; the
@@ -21,6 +22,7 @@ import glob
 import json
 import os
 import re
+import shutil
 import subprocess
 from datetime import datetime
 
@@ -33,6 +35,27 @@ SKIP = re.compile(
     r"\bTRANSFER\b|\bDEPOSIT\b|\bINTEREST\b|Beginning balance|Ending balance",
     re.IGNORECASE,
 )
+
+
+def ensure_pdftotext():
+    """Fail fast with an actionable message if the `pdftotext` binary is missing.
+
+    `pdftotext` (from Poppler) is a system binary, not pip-installable, so we
+    follow the conventional CLI pattern: detect it up front with shutil.which()
+    and, if absent, print OS-appropriate install instructions and exit — rather
+    than silently auto-installing, which would mutate the user's system and isn't
+    portable across macOS / Linux / Windows.
+    """
+    if shutil.which("pdftotext"):
+        return
+    raise SystemExit(
+        "Required dependency 'pdftotext' (Poppler) is not on PATH.\n"
+        "Install it, then re-run parse-bofa:\n"
+        "  macOS:          brew install poppler\n"
+        "  Debian/Ubuntu:  sudo apt-get install -y poppler-utils\n"
+        "  Fedora:         sudo dnf install -y poppler-utils\n"
+        "  Windows:        winget install poppler  (or: conda install -c conda-forge poppler)"
+    )
 
 
 def pdf_text(path):
@@ -52,6 +75,7 @@ def parse_bofa(folder, since=None, until=None, out="bofa_raw.jsonl"):
 
     `since`/`until` are inclusive "YYYY-MM-DD" strings (or None for no bound).
     """
+    ensure_pdftotext()  # clear, early failure if the Poppler binary is missing
     folder = os.path.expanduser(folder)
     since_d = datetime.strptime(since, "%Y-%m-%d").date() if since else None
     until_d = datetime.strptime(until, "%Y-%m-%d").date() if until else None

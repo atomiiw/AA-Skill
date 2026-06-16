@@ -10,6 +10,8 @@ and prints their return values as JSON:
                                      (current year first; 2 only when Jan-Mar)
   start_months(today, year)       -> list[{label,value}]  window months in year
   end_options(today, start)       -> list[{label,value}]  start..current month
+  start_days(start)               -> list[{label,value}]  1st + Mondays of the
+                                     start month (Stage 3.5 start-day options)
   resolve(today, start, end)      -> {since, until}  (until=today if end is the
                                      current month, never the future)
 
@@ -53,6 +55,25 @@ def end_options(today, start):
     while (y, m) <= (today.year, today.month):
         opts.append({"label": month_label(y, m), "value": f"{y}-{m:02d}"})
         y, m = add_months(y, m, 1)
+    return opts
+
+
+def start_days(start):
+    """Stage 3.5 start-day candidates for the start month: the 1st, then each
+    Monday, oldest first. `start` is a "YYYY-MM" string. Returns
+    [{label, value}] with value = ISO "YYYY-MM-DD".
+
+    The caller shows the first FOUR (1st + the first 3 Mondays) as the
+    AskUserQuestion buttons; the auto "Other" box covers a later Monday or any
+    custom day. No `today` needed — the start month is already chosen.
+    """
+    sy, sm = map(int, start.split("-"))
+    abbr = calendar.month_abbr[sm]
+    opts = [{"label": f"1st — {abbr} 1", "value": date(sy, sm, 1).isoformat()}]
+    last = calendar.monthrange(sy, sm)[1]
+    for d in range(1, last + 1):
+        if date(sy, sm, d).weekday() == 0:  # Monday
+            opts.append({"label": f"Mon {abbr} {d}", "value": date(sy, sm, d).isoformat()})
     return opts
 
 

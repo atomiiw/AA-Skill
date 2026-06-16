@@ -47,9 +47,10 @@ entrypoint**, `run.py`; the stage logic lives in the private `scripts/` package
 (functions only — never invoked directly). Always call `run.py` and a subcommand,
 e.g. `python3 .claude/skills/split-bills/run.py parse-bofa …`. If the folder ever
 moves, use its new path; the commands below assume `.claude/skills/split-bills/`:
-- `run.py daterange <start-years|start-months|end-options|resolve>` — computes
-  Stage 1 selector options (valid start years/months, end months, and the
-  resolved `--since`/`--until`) from today's date; prints JSON.
+- `run.py daterange <start-years|start-months|end-options|start-days|resolve>` —
+  computes Stage 1 selector options (valid start years/months, end months, and the
+  resolved `--since`/`--until`) from today's date, plus the Stage 3.5 `start-days`
+  options (1st + Mondays of the start month); prints JSON.
 - `run.py parse-bofa` — extracts purchases from the BofA PDFs →
   `…/intermediate/bofa_raw.jsonl` (keeps big PDF text OUT of context). Takes
   `--dir <BofA folder>`.
@@ -130,13 +131,20 @@ consent is the authorization. Never edit it otherwise.
 ## Output schema
 `bills.jsonl` and `split_bills.jsonl` — one JSON object per line:
 ```json
-{"brand": "UberEats", "item": "poke bowl", "total": "$18.52", "date": "2026-04-13", "source": "bofa"}
+{"brand": "UberEats", "item": "poke bowl", "total": "$18.52", "date": "2026-04-13", "source": "bofa", "card": "bofa"}
 ```
-- **brand** — a recognizable company/restaurant name (NOT the raw descriptor).
+- **brand** — **whoever takes the money**, as a recognizable name (NOT the raw
+  descriptor). Food ordered through a platform → brand = the platform (e.g.
+  UberEats) and the restaurant/dish goes in `item`; paid the restaurant directly
+  (in person / its own site) → the restaurant is the brand.
 - **item** — what was bought (`groceries`, `1 yr subscription`, a dish, clothing…).
 - **total** — string with currency symbol, `$` or `¥` (RMB).
 - **date** — ISO `YYYY-MM-DD`.
 - **source** — `bofa` | `qq` | `gmail` (helps dedupe & trace).
+- **card** — which card paid. For a **BofA** row, always the literal `"bofa"`. For
+  an **email receipt**, the card's **last 4 digits** when the body shows them
+  (e.g. `Visa ••••9261`, `ending in 9920`, `************7525` → `"9261"` /
+  `"9920"` / `"7525"`); if no card is shown, use `""`. Never guess the digits.
 - **unverified** — *optional* boolean. Set `true` on a row whose vendor you could
   only guess (see *Vendor normalization*); omit it on confident rows. `ledger`
   flags these with a `⚠` for the user to eyeball.
@@ -146,14 +154,17 @@ consent is the authorization. Never edit it otherwise.
 ## Stage 0 — Locate inputs (INTERACTIVE) — do this FIRST
 
 You need **two paths** from the user, asked one at a time in **plain text** — no
-`AskUserQuestion`, no options. Ask for the path, end your turn, and resume the skill
-when the user replies (they'll paste or drag-and-drop it).
+`AskUserQuestion`, no options. Send the pre-written line, end your turn, and resume
+when the user replies (they paste or drag-and-drop the path).
 
-1. Ask for the **BofA folder** — the directory of BofA statement PDFs. **STOP** and
-   wait; the reply becomes `--dir "<path>"`.
-2. Ask for the **secrets folder** — one directory holding `qq_auth.txt` and,
-   optionally, `gmail_app_pw.txt`. **STOP** and wait; the reply becomes
-   `--secrets-dir "<path>"`.
+1. **BofA folder** — send verbatim:
+   > Paste the path to your **Bank of America statements folder** (the folder of PDF eStatements).
+
+   **STOP** and wait; the reply becomes `--dir "<path>"`.
+2. **Secrets folder** — send verbatim:
+   > Paste the path to your **secrets folder** (holds `qq_auth.txt`, optionally `gmail_app_pw.txt`).
+
+   **STOP** and wait; the reply becomes `--secrets-dir "<path>"`.
 
 The secrets folder needs at least `qq_auth.txt`; without `gmail_app_pw.txt`,
 `run.py receipts` does QQ only. Reuse both paths for the rest of the session; if one
@@ -234,7 +245,8 @@ March, April, May, June.
    it, mark the row `unverified` and use `item:"unknown"` (see the no-fabrication
    HARD RULE in *Vendor normalization*).
 4. **Write** the cleaned rows (each `{brand, item, total:"$X.XX", date,
-   source:"bofa"}`, plus `"unverified": true` on any you couldn't confirm) with
+   source:"bofa", card:"bofa"}`, plus `"unverified": true` on any you couldn't
+   confirm) with
    the Write tool into `split_bill_outputs/intermediate/bofa_processed.jsonl`,
    then merge them into the ledger:
    ```bash
@@ -276,9 +288,18 @@ Now turn `email_raw.jsonl` into its processed counterpart,
    ```bash
    python3 .claude/skills/split-bills/run.py show --indices 4,5,6,12
    ```
-   Turn each into one row `{brand, item, total, date, source}` — `brand` from the
-   sender/subject (Anthropic, Vercel, SKIMS, Uber Eats…), `item`/`total` from the
-   body (`$` or `¥` as written), `date` from `date_header` as ISO.
+   Turn each into one row `{brand, item, total, date, source, card}` — `brand`
+   from the sender/subject (Anthropic, Vercel, SKIMS, Uber Eats…), `item`/`total`
+   from the body (`$` or `¥` as written), `date` from `date_header` as ISO, and
+   `card` = the last 4 digits if the body shows them (`Visa ••••9261` → `"9261"`),
+   else `""`.
+
+   **Vendor specifics** (apply only when the email actually shows it — invent nothing):
+   - **Food platforms** (UberEats, DoorDash, Grubhub…) — brand = the platform;
+     `item` = the restaurant + dish (e.g. brand `UberEats`, item `Wingstop — 8pc combo`).
+   - **UberEats** — also include the **delivered time** in `item` when the email shows it.
+   - **Rideshare** (Uber, Lyft, Waymo) — put as much **location** as the email gives
+     into `item`: best is depart + destination; otherwise at least the city.
 4. Collect those rows into the single file `email_processed.jsonl`, then merge it
    into the ledger:
    ```bash
@@ -298,31 +319,38 @@ step; if you ever need to re-sort, run
 
 ## Stage 3.5 — Start day (INTERACTIVE) → trim bills.jsonl
 
-After the **full, sorted** `bills.jsonl` exists, ask the user **which specific day
-the history should start on**, then drop every row dated before it. Use
-`AskUserQuestion` (one question). Per the tool's rules you need 2–4 fixed options
-plus the auto-added free-text **"Other"** box — present exactly:
+After the **full, sorted** `bills.jsonl` exists, ask the user **which day the
+history should start on**, then drop every row before it.
 
+First get the candidate days for the **start month** (the start month from Stage 1):
+```bash
+python3 .claude/skills/split-bills/run.py daterange start-days --start <YYYY-MM>
 ```
-Question: Which day should the bill history start on? Type a date in the "Other"
-          box (any format), or keep the first of the month.
-Options:
-  1. First of the month is fine   (keep everything; no trimming)
-  2. Type a specific start day    (reminder to use the built-in "Other" box)
-```
+It returns `[{label, value}]` — the **1st**, then each **Monday**, oldest first
+(value = ISO date). Take the **first four** (1st + first 3 Mondays) as the
+`AskUserQuestion` options; the auto-added **"Other"** box covers a later Monday or
+any custom day.
+
+**Ask (verbatim):**
+> Which day should the bill history start on? Pick one, or type any date in "Other".
+
+Options — use the returned `label`s, in order:
+- `1st — <Mon> 1` (keep everything; no trimming)
+- `Mon <Mon> <d>` · `Mon <Mon> <d>` · `Mon <Mon> <d>` (each option's `value` is its ISO start day)
 
 Interpret the answer:
-- **First of the month is fine** → do not trim; keep the whole ledger.
-- **Other (free text)** → the typed string is the start day. Pass it straight to
-  `trim`, which accepts **any format** (`4/16`, `4.16`, `04-16`, `0416`,
-  `April 16`, `2026-04-16`, …), infers the year from the ledger when omitted,
-  drops rows before that day, rewrites `bills.jsonl`, and prints
-  `{since, removed, remaining}`:
-  ```bash
-  python3 .claude/skills/split-bills/run.py trim --since "<what the user typed>"
-  ```
-  Report the `removed`/`remaining` counts. If `trim` prints a "Could not parse"
-  error, the string was ambiguous — say so and re-ask; never guess silently.
+- **The 1st option** → do not trim; keep the whole ledger.
+- **A Monday option** → trim to that option's `value` (ISO date).
+- **Other (free text)** → the typed string is the start day (e.g. a later Monday).
+
+For a Monday option or "Other", pass the date straight to `trim` — it accepts the
+ISO `value` **or** any loose format (`4/16`, `April 16`, `0416`, …), infers the
+year from the ledger, rewrites `bills.jsonl`, and prints `{since, removed, remaining}`:
+```bash
+python3 .claude/skills/split-bills/run.py trim --since "<ISO value, or what the user typed>"
+```
+Report the `removed`/`remaining` counts. If `trim` prints a "Could not parse"
+error, say so and re-ask; never guess silently.
 
 **STOP** here: send the question and wait for the user's pick before trimming.
 
@@ -338,6 +366,9 @@ Each row prints with an index `[N]`; those indices feed `split` below and stay
 stable because both `ledger` and `split` sort identically. Go through the ledger
 and ask the user, **for every line**, whether it is splittable (a shared expense)
 or personal.
+
+**Ask (verbatim) for each batch:**
+> Which of these are **splittable** (shared)? Check the shared ones — leave a row unchecked to keep it personal.
 
 - **One batch = one `multiSelect` question of 3 real ledger items.** Advance 3 at a
   time through the whole list (the last batch may hold fewer). Keep each batch a
@@ -373,24 +404,38 @@ BofA descriptors are `[<TYPE> <NNNN>] [<PROCESSOR>*]<NAME> <CITY><STATE> [phone]
 Resolve to a real **brand** in two passes:
 
 **Pass A — strip mechanically:**
-- Leading transaction type: `MOBILE PURCHASE 0410`, `PURCHASE 0412`,
-  `CHECKCARD 0411`, `RECURRING`.
+- Leading transaction type — strip it from `brand`, but **carry its meaning into
+  `item`** as a short phrase. The 4 digits right after it are the `MMDD`, not a
+  code to keep:
+  - `MOBILE PURCHASE` — tapped a mobile wallet (Apple/Google Pay) in person →
+    e.g. "apple paid on the spot".
+  - `PURCHASE` — physical card used in person → e.g. "paid in person".
+  - `CHECKCARD` — debit card keyed, often card-not-present → e.g. "online order"
+    (only when it fits; don't assert online for a clear storefront).
+  - `RECURRING` — an automatic subscription charge → e.g. "recurring subscription".
 - Processor prefixes (the brand is what FOLLOWS them):
   `SQ *` = Square · `TST*` = Toast (restaurant) · `CHE*` = Chegg ·
   `UEP*` / `LINK.COM*` = payment processors · `GOOGLE *` = Google service ·
   `OPENAI *` = OpenAI.
 - Trailing `CITY` + 2-letter `STATE`, phone numbers, store/auth numbers.
 
-**Pass B — identify what's left:**
+**Pass B — identify what's left, then build a rich `brand`:**
 - Obvious brands → use directly: `FIGMA`, `NOTION`, `ANTHROPIC`/`CLAUDE.AI`,
   `WINGSTOP`, `CHIPOTLE`, `HEYTEA`, `EREWHON`, `CVS`, `WAYMO`, `EXTRA SPACE`,
   `AMERICAN` (Airlines), `HOTEL NIKKO`, `DUKECARD`, `YOGURTLAND`.
 - Cryptic/abbreviated/unknown (`SQ *PHO N MOR`, `PARKO`, `DISCORD NITROMON`,
-  `UEP*THE PUBLIC IZ`, `TST* MOVITA JUICE`) → **WebSearch** `"<cleaned name>
-  <city> <state>"` to find the real business, then use that brand. Examples:
-  `PHO N MOR` → *Pho N More* (Vietnamese), `PARKO` → parking app,
-  `DISCORD NITROMON` → *Discord* (item: Nitro subscription),
-  `MOVITA JUICE` → *Movita Juice Bar*.
+  `UEP*THE PUBLIC IZ`, `TST* MOVITA JUICE`) → **WebSearch** to identify the real
+  business. **Search technique:** searching the whole descriptor (codes and all)
+  returns nothing — isolate the part that is *neither a code nor a location* (that
+  is the vendor name) and search **that name with the location**, e.g.
+  `fast times venice CA`, not `fast times`. The location usually disambiguates.
+
+**Build `brand` = name + category + location** once identified — e.g.
+`MOBILE PURCHASE 0428 SQ *FAST TIMES Venice CA` → `Fast Times (coffee shop, Venice CA)`.
+For an internet service with no physical location use `online` (most descriptors
+still carry a state code). If you can't get all three with confidence, keep the
+original descriptor in `brand` and flag the row (see the HARD RULE below) — never
+invent a category or a fuller name.
 
 **⛔ HARD RULE — flag any vendor you can't verify; an honest "unknown" beats a
 confident guess.** A vendor counts as verified only when it's an obvious known
@@ -402,6 +447,12 @@ brand or a WebSearch returns a clear matching business. For anything short of th
 3. Add `"unverified": true`.
 Verified rows omit `unverified`. The `ledger` `⚠` and your Stage 2/3 report surface
 these for the user to confirm.
+
+**No auto-expansion (BofA *and* email).** Never lengthen or "correct" an
+abbreviated vendor name unless a WebSearch confirms the longer form. A short name
+is often the real one — e.g. `pho n mor` stays `Pho N Mor`, **not** `Pho N More`,
+until a match proves the expansion. Same for email senders: take the name as
+written unless you've verified a fuller one.
 
 There is no free personal API for reverse-descriptor lookup (Mastercard/Visa
 offer one but require issuer credentials), so the WebSearch fallback is the

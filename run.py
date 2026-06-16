@@ -80,6 +80,10 @@ def cmd_daterange(args):
         if not args.start:
             raise SystemExit("daterange end-options needs --start YYYY-MM")
         result = daterange.end_options(today, args.start)
+    elif args.op == "start-days":
+        if not args.start:
+            raise SystemExit("daterange start-days needs --start YYYY-MM")
+        result = daterange.start_days(args.start)
     elif args.op == "resolve":
         if not (args.start and args.end):
             raise SystemExit("daterange resolve needs --start and --end (YYYY-MM)")
@@ -141,7 +145,9 @@ def build_parser():
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     dr = sub.add_parser("daterange", help="Stage 1 date-range selectors (JSON out)")
-    dr.add_argument("op", choices=["start-years", "start-months", "end-options", "resolve"])
+    dr.add_argument(
+        "op", choices=["start-years", "start-months", "end-options", "start-days", "resolve"]
+    )
     dr.add_argument("--today", help="Override today's date (YYYY-MM-DD) for testing.")
     dr.add_argument("--year", type=int, help="start-months: which year.")
     dr.add_argument("--start", help="end-options/resolve: start month YYYY-MM.")

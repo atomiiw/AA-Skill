@@ -190,7 +190,7 @@ def ledger_text(bills_path="bills.jsonl"):
     rows = _load(bills_path)
     rows.sort(key=_sort_key)
     unverified = sum(1 for r in rows if r.get("unverified"))
-    header = f"{len(rows)} bills (idx | date | brand | item | total | source)"
+    header = f"{len(rows)} bills (idx | date | brand | item | total | source | card)"
     if unverified:
         header += f"  — ⚠ {unverified} unverified (eyeball these)"
     out = [header]
@@ -198,7 +198,8 @@ def ledger_text(bills_path="bills.jsonl"):
         flag = "  ⚠ unverified" if r.get("unverified") else ""
         out.append(
             f"[{i:>3}] {r.get('date', '?'):10} {str(r.get('brand', '?')):22} | "
-            f"{r.get('item', '')} | {r.get('total', '')} | {r.get('source', '')}{flag}"
+            f"{r.get('item', '')} | {r.get('total', '')} | {r.get('source', '')} | "
+            f"{r.get('card', '')}{flag}"
         )
     return "\n".join(out)
 
